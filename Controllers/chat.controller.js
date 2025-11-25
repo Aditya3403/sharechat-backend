@@ -1,5 +1,6 @@
 import User from '../Models/Users.js';
 import Chat from '../Models/Chat.js';
+import ChatMedia from '../Models/ChatMedia.js';
 
 export const sendMessage = async (req, res) => {
   try {
@@ -129,42 +130,43 @@ export const sendMessageSocket = async (senderId, receiverId, message) => {
 export const getUserMessages = async (req, res) => {
   try {
     const { userId, otherUserId } = req.params;
-    
-    // Find the user
-    const user = await User.findById(userId);
-    
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-    
-    // Filter messages to only include those between these two users
-    const relevantMessages = user.messages.filter(msg => 
-      (msg.sender.toString() === userId && msg.receiver.toString() === otherUserId) ||
-      (msg.sender.toString() === otherUserId && msg.receiver.toString() === userId)
-    );
-    
-    // Sort messages by timestamp (oldest first)
-    relevantMessages.sort((a, b) => new Date(a.time) - new Date(b.time));
-    
-    // Mark unread messages as read
-    let updated = false;
-    relevantMessages.forEach(msg => {
-      if (msg.receiver.toString() === userId && !msg.read) {
-        msg.read = true;
-        updated = true;
-      }
+
+    const chat = await Chat.findOne({
+      participants: { $all: [userId, otherUserId] }
+    })
+    .populate({
+      path: "messages.mediaId",
+      model: "ChatMedia",
+      select: "url mediaType mimeType size"
     });
-    
-    if (updated) {
-      await user.save();
+
+    if (!chat) {
+      return res.json([]);
     }
-    
-    res.json(relevantMessages);
+
+    const formatted = chat.messages.map(m => ({
+      _id: m._id,
+      sender: m.sender,
+      receiver: m.receiver,
+      text: m.text || "",
+      mediaUrl: m.mediaId ? m.mediaId.url : null,
+      mediaType: m.mediaId ? m.mediaId.mediaType : null,
+      timestamp: m.timestamp || m.time,
+      read: m.read,
+      status: m.status
+    }));
+
+    return res.json(formatted);
+
   } catch (error) {
-    console.error('Error fetching user messages:', error);
-    res.status(500).json({ message: 'Internal Server Error', error: error.message });
+    console.error("Error fetching chat messages:", error);
+    res.status(500).json({
+      message: "Internal Server Error",
+      error: error.message
+    });
   }
 };
+
 
 // Controller function to mark messages as read
 export const markMessagesAsRead = async (req, res) => {
@@ -341,3 +343,74 @@ export const addToChatWith = async (req, res) => {
     res.status(500).json({ message: 'Internal Server Error', error: error.message });
   }
 };
+
+
+export const sendImageMessage = async (req, res) => {
+  try {
+    const { userId, otherUserId, chatId } = req.body;
+
+    if (!req.file) {
+      return res.status(400).json({ message: "No file uploaded" });
+    }
+
+    // location we store
+    const imagePath = "/uploads/chat-media/" + req.file.filename;
+
+    // 1️⃣ Save file metadata
+    const media = await ChatMedia.create({
+      chatId,
+      sender: userId,
+      receiver: otherUserId,
+      mediaType: "image",
+      url: imagePath,
+      size: req.file.size,
+      mimeType: req.file.mimetype,
+      originalName: req.file.originalname,
+      extension: req.file.originalname.split(".").pop(),
+    });
+
+    // 2️⃣ Create message object
+    const newMessage = {
+      sender: userId,
+      receiver: otherUserId,
+      type: "image",
+      mediaUrl: media.url,
+      mediaId: media._id,
+      text: "",
+      timestamp: new Date(),
+      read: false,
+      status: "sent",
+    };
+
+    // 3️⃣ Insert into chat history
+    await Chat.findByIdAndUpdate(chatId, {
+      $push: { messages: newMessage },
+      $set: { updatedAt: new Date() },
+    });
+
+    // 4️⃣ Insert into sender + receiver message list
+    await User.findByIdAndUpdate(userId, {
+      $push: { messages: newMessage },
+      $addToSet: { chats: chatId },
+    });
+
+    await User.findByIdAndUpdate(otherUserId, {
+      $push: { messages: newMessage },
+      $addToSet: { chats: chatId },
+    });
+
+    return res.json({
+      success: true,
+      message: newMessage,
+      media
+    });
+
+  } catch (error) {
+    console.error("Error sending image:", error);
+    return res.status(500).json({
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+

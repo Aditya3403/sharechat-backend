@@ -28,41 +28,139 @@ const streamUpload = (buffer) => {
 // User Signup
 export const signup = async (req, res) => {
   try {
-    const { firstName, lastName, email, password } = req.body;
+    const { firstName, lastName, email, phoneNumber, discoverySource, password } = req.body;
     const file = req.file;
 
-    if (!file) {
-      return res.status(400).json({ message: 'No file uploaded' });
+    // Validate required fields
+    if (!firstName || !lastName || !email || !phoneNumber || !discoverySource || !password) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'All fields are required: firstName, lastName, email, phoneNumber, discoverySource, password' 
+      });
     }
 
-    const result = await streamUpload(file.buffer);
+    // Check if user already exists
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: 'User already exists with this email'
+      });
+    }
 
+    // Check if phone number already exists
+    const existingPhone = await User.findOne({ phoneNumber });
+    if (existingPhone) {
+      return res.status(400).json({
+        success: false,
+        message: 'Phone number already registered'
+      });
+    }
+
+    let avatarData = null;
+
+    // Handle profile picture upload
+    if (file) {
+      try {
+        const result = await streamUpload(file.buffer);
+        avatarData = {
+          public_id: result.public_id,
+          url: result.secure_url,
+        };
+      } catch (uploadError) {
+        console.error('Avatar upload error:', uploadError);
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to upload profile picture',
+          error: uploadError.message
+        });
+      }
+    } else {
+      // Create default avatar or return error based on your requirement
+      return res.status(400).json({
+        success: false,
+        message: 'Profile picture is required'
+      });
+    }
+
+    // Validate discovery source
+    const validDiscoverySources = ['Google Search', 'Friend Referral', 'Social Media', 'Advertisement', 'Other'];
+    if (!validDiscoverySources.includes(discoverySource)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid discovery source'
+      });
+    }
+
+    // Create new user with all fields
     const newUser = new User({
       name: `${firstName} ${lastName}`,
       email,
+      phoneNumber,
+      discoverySource,
       password,
-      avatar: {
-        public_id: result.public_id,
-        url: result.secure_url,
-      },
+      avatar: avatarData,
+      isVerified: true, // Since we verified via OTP
+      profileCompleted: true,
       chats: [],
-      chatWith: []
+      chatWith: [],
+      notifications: [],
+      messages: [],
+      isOnline: false,
+      lastSeen: new Date()
     });
 
     await newUser.save();
 
-    const token = jwt.sign({ id: newUser._id }, 'your_jwt_secret', { expiresIn: '30d' });
+    // Generate JWT token
+    const token = jwt.sign({ 
+      id: newUser._id,
+      email: newUser.email,
+      name: newUser.name
+    }, process.env.JWT_SECRET || 'your_jwt_secret', { 
+      expiresIn: '30d' 
+    });
+
+    // Save token to user
     newUser.token = token;
     await newUser.save();
+
+    // Return user data (excluding password)
+    const userResponse = {
+      _id: newUser._id,
+      name: newUser.name,
+      email: newUser.email,
+      phoneNumber: newUser.phoneNumber,
+      discoverySource: newUser.discoverySource,
+      avatar: newUser.avatar,
+      isVerified: newUser.isVerified,
+      profileCompleted: newUser.profileCompleted,
+      isOnline: newUser.isOnline,
+      lastSeen: newUser.lastSeen,
+      token: newUser.token,
+      createdAt: newUser.createdAt
+    };
 
     res.status(201).json({ 
       success: true,
       message: 'User created successfully', 
-      user: newUser, 
+      user: userResponse, 
       token 
     });
+
   } catch (error) {
     console.error('Signup error:', error);
+    
+    // Handle specific MongoDB errors
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyPattern)[0];
+      return res.status(400).json({
+        success: false,
+        message: `${field} already exists`,
+        error: error.message
+      });
+    }
+
     res.status(500).json({ 
       success: false,
       message: 'Internal Server Error', 

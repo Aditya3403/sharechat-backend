@@ -33,6 +33,11 @@ const ChatSchema = new mongoose.Schema({
       type: String,
       enum: ['sent', 'delivered', 'read'],
       default: 'sent'
+    },
+    mediaId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ChatMedia",
+      default: null,
     }
   }],
   createdAt: {

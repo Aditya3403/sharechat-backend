@@ -14,6 +14,15 @@ const UserSchema = new mongoose.Schema({
     type: String, 
     required: true 
   },
+  phoneNumber: {
+    type: String,
+    required: true
+  },
+  discoverySource: {
+    type: String,
+    required: true,
+    enum: ['Google Search', 'Friend Referral', 'Social Media', 'Advertisement', 'Other']
+  },
   avatar: {
     public_id: { 
       type: String, 
@@ -26,6 +35,10 @@ const UserSchema = new mongoose.Schema({
   },
   token: { 
     type: String 
+  },
+  isVerified: {
+    type: Boolean,
+    default: false
   },
   // Array of chat IDs the user participates in
   chats: [{ 
@@ -133,6 +146,16 @@ const UserSchema = new mongoose.Schema({
   // Socket ID for real-time communication
   socketId: {
     type: String
+  },
+  // Profile completion status
+  profileCompleted: {
+    type: Boolean,
+    default: false
+  },
+  // Account creation date
+  accountCreatedAt: {
+    type: Date,
+    default: Date.now
   }
 }, { 
   timestamps: true,
@@ -141,7 +164,9 @@ const UserSchema = new mongoose.Schema({
     { 'chatWith.userId': 1 },
     { 'messages.chatId': 1 },
     { 'messages.sender': 1 },
-    { 'messages.receiver': 1 }
+    { 'messages.receiver': 1 },
+    { phoneNumber: 1 },
+    { discoverySource: 1 }
   ]
 });
 
@@ -166,6 +191,12 @@ UserSchema.methods.updateChatWith = async function(contactId, message) {
     };
     await this.save();
   }
+};
+
+// Method to mark profile as completed
+UserSchema.methods.markProfileCompleted = async function() {
+  this.profileCompleted = true;
+  await this.save();
 };
 
 const User = mongoose.model('User', UserSchema);
