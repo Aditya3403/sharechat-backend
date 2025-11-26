@@ -18,13 +18,13 @@ const app = express();
 const server = createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: ["http://localhost:3001","http://localhost:3002"],
+    origin: process.env.FRONTEND_URL,
     credentials: true
   },
 });
 
 app.use(cors({
-  origin: [ "http://localhost:3001","http://localhost:3002"],
+  origin: process.env.FRONTEND_URL,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true
@@ -47,6 +47,20 @@ io.on("connection", (socket) => {
 socket.on("send-message", async ({ sender, receiver, message, timestamp }) => {
   try {
     const savedMessage = await sendMessageSocket(sender, receiver, message);
+    await User.findByIdAndUpdate(receiver, {
+      $addToSet: {
+        chatWith: {
+          userId: sender,
+          name: (await User.findById(sender).select("name avatar")).name,
+          avatar: (await User.findById(sender).select("avatar")).avatar,
+          lastMessage: {
+            text: message,
+            timestamp: savedMessage.time,
+            read: false
+          }
+        }
+      }
+    });
     
     const receiverSockets = Array.from(io.sockets.sockets.values())
       .filter(s => s.userId === receiver);
@@ -74,7 +88,6 @@ socket.on("send-message", async ({ sender, receiver, message, timestamp }) => {
 
 socket.on("send-image", async ({ sender, receiver, chatId, imageUrl }) => {
   try {
-    // 1. Create a media record
     const media = await ChatMedia.create({
       chatId,
       sender,
@@ -83,13 +96,12 @@ socket.on("send-image", async ({ sender, receiver, chatId, imageUrl }) => {
       url: imageUrl,
     });
 
-    // 2. Create message reference
     const msg = {
       sender,
       receiver,
       text: "",
       mediaId: media._id,
-      timestamp: new Date(),
+      time: new Date(),
       read: false,
       status: "sent"
     };
@@ -98,7 +110,6 @@ socket.on("send-image", async ({ sender, receiver, chatId, imageUrl }) => {
       $push: { messages: msg }
     });
 
-    // 3. Emit to receiver sockets
     const receiverSockets = [...io.sockets.sockets.values()]
       .filter(s => s.userId === receiver);
 
@@ -106,7 +117,6 @@ socket.on("send-image", async ({ sender, receiver, chatId, imageUrl }) => {
       s.emit("receive-image", { msg, media });
     });
 
-    // 4. Confirm to sender
     socket.emit("image-sent", { msg, media });
 
   } catch (error) {

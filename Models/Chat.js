@@ -19,9 +19,9 @@ const ChatSchema = new mongoose.Schema({
     },
     text: {
       type: String,
-      required: true
+      default: ""
     },
-    timestamp: {
+    time: {
       type: Date,
       default: Date.now
     },
@@ -52,7 +52,6 @@ const ChatSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Update timestamp when new message is added
 ChatSchema.pre('save', function(next) {
   if (this.isModified('messages')) {
     this.updatedAt = Date.now();

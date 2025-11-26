@@ -5,13 +5,12 @@ import { Readable } from 'stream';
 
 // Configure Cloudinary
 cloudinary.config({
-  cloud_name: 'memoriesshare',
-  api_key: '499337929461178',
-  api_secret: 'AVtfSMH1XcIPB0YFBkQQ1lQiggo',
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
   secure: true,
 });
 
-// Helper function to upload file buffer to Cloudinary
 const streamUpload = (buffer) => {
   return new Promise((resolve, reject) => {
     const stream = cloudinary.v2.uploader.upload_stream((error, result) => {
@@ -76,7 +75,6 @@ export const signup = async (req, res) => {
         });
       }
     } else {
-      // Create default avatar or return error based on your requirement
       return res.status(400).json({
         success: false,
         message: 'Profile picture is required'
@@ -100,7 +98,7 @@ export const signup = async (req, res) => {
       discoverySource,
       password,
       avatar: avatarData,
-      isVerified: true, // Since we verified via OTP
+      isVerified: true,
       profileCompleted: true,
       chats: [],
       chatWith: [],
@@ -117,7 +115,7 @@ export const signup = async (req, res) => {
       id: newUser._id,
       email: newUser.email,
       name: newUser.name
-    }, process.env.JWT_SECRET || 'your_jwt_secret', { 
+    }, process.env.JWT_SECRET, { 
       expiresIn: '30d' 
     });
 
@@ -125,7 +123,6 @@ export const signup = async (req, res) => {
     newUser.token = token;
     await newUser.save();
 
-    // Return user data (excluding password)
     const userResponse = {
       _id: newUser._id,
       name: newUser.name,
@@ -151,7 +148,6 @@ export const signup = async (req, res) => {
   } catch (error) {
     console.error('Signup error:', error);
     
-    // Handle specific MongoDB errors
     if (error.code === 11000) {
       const field = Object.keys(error.keyPattern)[0];
       return res.status(400).json({
@@ -183,7 +179,7 @@ export const login = async (req, res) => {
       });
     }
 
-    const token = jwt.sign({ id: user._id }, 'your_jwt_secret', { expiresIn: '30d' });
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '30d' });
     user.token = token;
     await user.save();
 
@@ -245,11 +241,10 @@ export const getAllUsers = async (req, res) => {
   
       const search = req.query.search || '';
       const query = {
-        _id: { $ne: req.user._id }, // Exclude current user
-        name: { $regex: search, $options: 'i' } // Case-insensitive search
+        _id: { $ne: req.user._id },
+        name: { $regex: search, $options: 'i' }
       };
       
-      // Add better error handling for the database query
       const users = await User.find(query)
         .select('name avatar _id')
         .catch(err => {

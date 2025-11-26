@@ -1,71 +1,102 @@
 import User from '../Models/Users.js';
 import Chat from '../Models/Chat.js';
 import ChatMedia from '../Models/ChatMedia.js';
+import cloudinary from 'cloudinary';
+import { Readable } from 'stream';
+
+// Cloudinary config
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+  secure: true,
+});
+
+const uploadToCloudinary = (buffer) => {
+  return new Promise((resolve, reject) => {
+    const uploader = cloudinary.v2.uploader.upload_stream(
+      { resource_type: "auto", folder: "chat_media" },
+      (err, result) => {
+        if (result) resolve(result);
+        else reject(err);
+      }
+    );
+
+    Readable.from(buffer).pipe(uploader);
+  });
+};
 
 export const sendMessage = async (req, res) => {
   try {
     const { userId, otherUserId, message } = req.body;
-
     if (!userId || !otherUserId || !message) {
       return res.status(400).json({ message: 'Sender, receiver and message are required' });
     }
 
-    // Get sender details for notification
-    const sender = await User.findById(userId).select('name avatar');
-    if (!sender) {
-      return res.status(404).json({ message: 'Sender not found' });
-    }
+    const sender = await User.findById(userId).select("name avatar");
+    const receiver = await User.findById(otherUserId).select("name avatar");
 
-    // Find or create chat
+    // find or create chat
     let chat = await Chat.findOne({
       participants: { $all: [userId, otherUserId] }
-    }) || new Chat({ 
-      participants: [userId, otherUserId], 
-      messages: [] 
     });
 
-    // Create message
+    if (!chat) {
+      chat = await Chat.create({
+        participants: [userId, otherUserId],
+        messages: []
+      });
+    }
+
     const newMessage = {
       sender: userId,
       receiver: otherUserId,
       text: message,
-      time: new Date().toISOString(),
+      time: new Date(),
       read: false
     };
 
-    // Add message to chat
     chat.messages.push(newMessage);
     await chat.save();
 
-    // Update both users' messages arrays
     await User.findByIdAndUpdate(userId, {
-      $push: { messages: newMessage },
-      $addToSet: { chats: chat._id }
-    });
-    
-    // Update receiver with message and add notification
-    await User.findByIdAndUpdate(otherUserId, {
-      $push: { 
-        messages: newMessage,
-        notifications: {
-          sender: userId,
-          senderName: sender.name,
-          senderAvatar: sender.avatar,
-          message: message,
-          chatId: chat._id,
-          read: false
+      $addToSet: {
+        chatWith: {
+          userId: otherUserId,
+          name: receiver.name,
+          avatar: receiver.avatar,
+          lastMessage: {
+            text: message,
+            timestamp: new Date(),
+            read: false
+          }
         }
-      },
-      $addToSet: { chats: chat._id }
+      }
     });
 
-    res.status(200).json({
+    await User.findByIdAndUpdate(otherUserId, {
+      $addToSet: {
+        chatWith: {
+          userId: userId,
+          name: sender.name,
+          avatar: sender.avatar,
+          lastMessage: {
+            text: message,
+            timestamp: new Date(),
+            read: false
+          }
+        }
+      }
+    });
+
+    return res.status(200).json({
       success: true,
       message: newMessage
     });
+
   } catch (error) {
-    console.error('Error sending message:', error);
-    res.status(500).json({ message: 'Internal Server Error', error: error.message });
+    console.log("ERR sending message:", error);
+    return res.status(500).json({ message: "Internal Error", error: error.message });
   }
 };
 
@@ -126,6 +157,7 @@ export const sendMessageSocket = async (senderId, receiverId, message) => {
     throw error;
   }
 };
+
 // Controller function to get messages between two users
 export const getUserMessages = async (req, res) => {
   try {
@@ -167,7 +199,6 @@ export const getUserMessages = async (req, res) => {
   }
 };
 
-
 // Controller function to mark messages as read
 export const markMessagesAsRead = async (req, res) => {
   try {
@@ -180,7 +211,6 @@ export const markMessagesAsRead = async (req, res) => {
       return res.status(404).json({ message: 'Chat not found' });
     }
     
-    // Mark messages as read where user is the receiver
     let updated = false;
     chat.messages.forEach(msg => {
       if (msg.receiver.toString() === userId && !msg.read) {
@@ -264,7 +294,7 @@ export const getUserChats = async (req, res) => {
     res.status(500).json({ message: 'Internal Server Error', error: error.message });
   }
 };
-// In your user controller
+
 export const addToChatWith = async (req, res) => {
   try {
     const { userId, otherUserId } = req.body;
@@ -344,73 +374,90 @@ export const addToChatWith = async (req, res) => {
   }
 };
 
-
 export const sendImageMessage = async (req, res) => {
   try {
     const { userId, otherUserId, chatId } = req.body;
 
+    // Validate
     if (!req.file) {
-      return res.status(400).json({ message: "No file uploaded" });
+      return res.status(400).json({ message: "No image provided" });
     }
 
-    // location we store
-    const imagePath = "/uploads/chat-media/" + req.file.filename;
+    // Validate sender
+    const sender = await User.findById(userId);
+    if (!sender) {
+      return res.status(404).json({ message: "Sender not found" });
+    }
 
-    // 1️⃣ Save file metadata
+    // Cloudinary upload
+    const uploaded = await uploadToCloudinary(req.file.buffer);
+
+    // Find or create chat
+    let chat = await Chat.findOne({
+      participants: { $all: [userId, otherUserId] },
+    });
+
+    if (!chat) {
+      chat = await Chat.create({
+        participants: [userId, otherUserId],
+        messages: [],
+      });
+    }
+
+    // Create media record
     const media = await ChatMedia.create({
-      chatId,
+      chatId: chat._id,
       sender: userId,
       receiver: otherUserId,
       mediaType: "image",
-      url: imagePath,
-      size: req.file.size,
-      mimeType: req.file.mimetype,
+      url: uploaded.secure_url,
+      public_id: uploaded.public_id,
+      size: uploaded.bytes,
+      mimeType: uploaded.format,
       originalName: req.file.originalname,
       extension: req.file.originalname.split(".").pop(),
     });
 
-    // 2️⃣ Create message object
-    const newMessage = {
+    // Create message
+    const msg = {
       sender: userId,
       receiver: otherUserId,
-      type: "image",
-      mediaUrl: media.url,
-      mediaId: media._id,
       text: "",
-      timestamp: new Date(),
-      read: false,
+      time: new Date(),
       status: "sent",
+      read: false,
+      mediaId: media._id,
     };
 
-    // 3️⃣ Insert into chat history
-    await Chat.findByIdAndUpdate(chatId, {
-      $push: { messages: newMessage },
-      $set: { updatedAt: new Date() },
-    });
+    chat.messages.push(msg);
+    await chat.save();
 
-    // 4️⃣ Insert into sender + receiver message list
+    // Push message to both users
     await User.findByIdAndUpdate(userId, {
-      $push: { messages: newMessage },
-      $addToSet: { chats: chatId },
+      $push: { messages: msg },
+      $addToSet: { chats: chat._id },
     });
 
     await User.findByIdAndUpdate(otherUserId, {
-      $push: { messages: newMessage },
-      $addToSet: { chats: chatId },
+      $push: { messages: msg },
+      $addToSet: { chats: chat._id },
     });
 
-    return res.json({
+    return res.status(200).json({
       success: true,
-      message: newMessage,
-      media
+      chatId: chat._id,
+      message: msg,
+      media,
     });
 
   } catch (error) {
     console.error("Error sending image:", error);
     return res.status(500).json({
+      success: false,
       message: "Internal server error",
       error: error.message,
     });
   }
 };
+
 

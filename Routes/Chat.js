@@ -13,12 +13,7 @@ import { verifyToken } from '../Middlewares/verifyToken.js';
 
 const router = express.Router();
 
-const storage = multer.diskStorage({
-  destination: "uploads/chat-media",
-  filename: (req, file, cb) => cb(null, Date.now() + "-" + file.originalname)
-});
-
-const upload = multer({ storage });
+const upload = multer({ storage: multer.memoryStorage() });
 
 router.post('/messages', verifyToken, sendMessage);
 router.get('/messages/user/:userId/:otherUserId', verifyToken, getUserMessages);

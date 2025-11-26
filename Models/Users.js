@@ -40,12 +40,10 @@ const UserSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
-  // Array of chat IDs the user participates in
   chats: [{ 
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'Chat' 
   }],
-  // Array of users the current user chats with
   chatWith: [{
     userId: { 
       type: mongoose.Schema.Types.ObjectId, 
@@ -99,7 +97,6 @@ const UserSchema = new mongoose.Schema({
       default: Date.now
     }
   }],
-  // Individual messages stored at user level
   messages: [{
     chatId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -117,7 +114,7 @@ const UserSchema = new mongoose.Schema({
     },
     text: {
       type: String,
-      required: true
+      default:""
     },
     timestamp: {
       type: Date,
@@ -127,39 +124,32 @@ const UserSchema = new mongoose.Schema({
       type: Boolean,
       default: false
     },
-    // For message status (sent, delivered, read)
     status: {
       type: String,
       enum: ['sent', 'delivered', 'read'],
       default: 'sent'
     }
   }],
-  // Online status
   isOnline: {
     type: Boolean,
     default: false
   },
-  // Last seen timestamp
   lastSeen: {
     type: Date
   },
-  // Socket ID for real-time communication
   socketId: {
     type: String
   },
-  // Profile completion status
   profileCompleted: {
     type: Boolean,
     default: false
   },
-  // Account creation date
   accountCreatedAt: {
     type: Date,
     default: Date.now
   }
 }, { 
   timestamps: true,
-  // Add index for better query performance
   indexes: [
     { 'chatWith.userId': 1 },
     { 'messages.chatId': 1 },
@@ -170,14 +160,12 @@ const UserSchema = new mongoose.Schema({
   ]
 });
 
-// Virtual for getting unread message count
 UserSchema.virtual('unreadCount').get(function() {
   return this.messages.filter(msg => 
     msg.receiver.equals(this._id) && !msg.read
   ).length;
 });
 
-// Method to update last message in chatWith
 UserSchema.methods.updateChatWith = async function(contactId, message) {
   const chatWithItem = this.chatWith.find(item => 
     item.userId.toString() === contactId.toString()
@@ -193,7 +181,6 @@ UserSchema.methods.updateChatWith = async function(contactId, message) {
   }
 };
 
-// Method to mark profile as completed
 UserSchema.methods.markProfileCompleted = async function() {
   this.profileCompleted = true;
   await this.save();

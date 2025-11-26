@@ -33,10 +33,9 @@ const ChatMediaSchema = new mongoose.Schema({
   size: Number,
   extension: String,
 
-  originalName: String,    // abc.png
-  mimeType: String,        // image/png
+  originalName: String,   
+  mimeType: String,      
 
-  // For ordering / partial load
   createdAt: {
     type: Date,
     default: Date.now

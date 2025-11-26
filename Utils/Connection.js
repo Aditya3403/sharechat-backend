@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-const url = "mongodb+srv://ADMIN:6etcZ4TsBAn6LUqQ@crudapp.djxuw.mongodb.net/ShareChat?retryWrites=true&w=majority&appName=CRUDAPP";
+const url = process.env.MONGODB_URL;
 
 mongoose.connect(url,{
     

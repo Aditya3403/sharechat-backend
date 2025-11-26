@@ -5,7 +5,6 @@ import nodemailer from 'nodemailer';
 import dotenv from "dotenv" ;
 dotenv.config();
 
-// OTP storage (in production, use Redis)
 const otpStore = new Map();
 
 // Email transporter
@@ -22,7 +21,6 @@ export const sendOTP = async (req, res) => {
   try {
     const { email } = req.body;
 
-    // Check if user already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({
@@ -31,7 +29,6 @@ export const sendOTP = async (req, res) => {
       });
     }
 
-    // Generate OTP
     const otp = otpGenerator.generate(6, {
       digits: true,
       lowerCaseAlphabets: false,
@@ -39,13 +36,11 @@ export const sendOTP = async (req, res) => {
       specialChars: false,
     });
 
-    // Store OTP with timestamp
     otpStore.set(email, {
       otp,
       timestamp: Date.now(),
     });
 
-    // Send email
     const mailOptions = {
       from: process.env.EMAIL_USER,
       to: email,
@@ -91,7 +86,6 @@ export const verifyOTP = async (req, res) => {
       });
     }
 
-    // Check if OTP is expired (10 minutes)
     if (Date.now() - storedData.timestamp > 10 * 60 * 1000) {
       otpStore.delete(email);
       return res.status(400).json({
@@ -107,7 +101,6 @@ export const verifyOTP = async (req, res) => {
       });
     }
 
-    // OTP verified successfully
     otpStore.delete(email);
     
     res.status(200).json({
