@@ -116,6 +116,15 @@ const UserSchema = new mongoose.Schema({
       type: String,
       default:""
     },
+    mediaType: {
+      type: String,
+      enum: ["image", "video", "document"],
+      default: "image"
+    },
+
+    mediaUrl: {
+      type: String,
+    },
     timestamp: {
       type: Date,
       default: Date.now

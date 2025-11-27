@@ -44,56 +44,77 @@ io.on("connection", (socket) => {
     console.log(`User ${userId} registered with socket ${socket.id}`);
   });
 
-socket.on("send-message", async ({ sender, receiver, message, timestamp }) => {
-  try {
-    const savedMessage = await sendMessageSocket(sender, receiver, message);
-    await User.findByIdAndUpdate(receiver, {
-      $addToSet: {
-        chatWith: {
+  socket.on("send-message", async ({ sender, receiver, chatId, message }) => {
+    try {
+      const savedMessage = await sendMessageSocket(sender, receiver, message);
+
+      const senderData = await User.findById(sender).select("name avatar");
+
+      const receiverDoc = await User.findById(receiver);
+
+      // find existing chat entry
+      const existing = receiverDoc.chatWith.find(
+        u => u.userId.toString() === sender.toString()
+      );
+
+      if (existing) {
+        // Update last message only
+        existing.lastMessage = {
+          text: message,
+          timestamp: savedMessage.time,
+          read: false
+        };
+      } else {
+        // Create a new chat entry
+        receiverDoc.chatWith.push({
           userId: sender,
-          name: (await User.findById(sender).select("name avatar")).name,
-          avatar: (await User.findById(sender).select("avatar")).avatar,
+          name: senderData.name,
+          avatar: senderData.avatar,
           lastMessage: {
             text: message,
             timestamp: savedMessage.time,
             read: false
           }
-        }
+        });
       }
-    });
-    
-    const receiverSockets = Array.from(io.sockets.sockets.values())
-      .filter(s => s.userId === receiver);
-    
-    receiverSockets.forEach(s => {
-      s.emit("receive-message", {
-        sender,
-        message,
-        timestamp: savedMessage.time
-      });
-    });
-    
-    socket.emit("message-sent", {
-      success: true,
-      message: savedMessage
-    });
-    
-  } catch (error) {
-    console.error("Error processing message:", error);
-    socket.emit("message-error", {
-      error: "Failed to send message"
-    });
-  }
-});
 
-socket.on("send-image", async ({ sender, receiver, chatId, imageUrl }) => {
+      await receiverDoc.save();
+
+      // Emit socket
+      const receiverSockets = Array.from(io.sockets.sockets.values())
+        .filter(s => s.userId === receiver);
+
+      receiverSockets.forEach(s => {
+        s.emit("receive-message", {
+          sender,
+          message,
+          chatId,
+          timestamp: savedMessage.time,
+        });
+      });
+
+      socket.emit("message-sent", {
+        success: true,
+        message: savedMessage
+      });
+
+    } catch (error) {
+      console.error("Error processing message:", error);
+      socket.emit("message-error", {
+        error: "Failed to send message"
+      });
+    }
+  });
+
+
+  socket.on("send-image", async ({ sender, receiver, chatId, mediaUrl }) => {
   try {
     const media = await ChatMedia.create({
       chatId,
       sender,
       receiver,
       mediaType: "image",
-      url: imageUrl,
+      url: mediaUrl,
     });
 
     const msg = {
@@ -110,25 +131,70 @@ socket.on("send-image", async ({ sender, receiver, chatId, imageUrl }) => {
       $push: { messages: msg }
     });
 
+    const senderUser = await User.findById(sender).select("name avatar");
+    const receiverDoc = await User.findById(receiver);
+
+    const existing = receiverDoc.chatWith.find(
+      u => u.userId.toString() === sender.toString()
+    );
+
+    if (existing) {
+      existing.lastMessage = {
+        text: "(Image)",
+        timestamp: msg.time,
+        read: false,
+      };
+    } else {
+      receiverDoc.chatWith.push({
+        userId: sender,
+        name: senderUser.name,
+        avatar: {
+          public_id: senderUser.avatar.public_id,
+          url: senderUser.avatar.url
+        },
+        lastMessage: {
+          text: "(Image)",
+          timestamp: msg.time,
+          read: false
+        }
+      });
+    }
+
+    receiverDoc.markModified("chatWith");
+    await receiverDoc.save();
+
+
     const receiverSockets = [...io.sockets.sockets.values()]
       .filter(s => s.userId === receiver);
 
     receiverSockets.forEach(s => {
-      s.emit("receive-image", { msg, media });
+      s.emit("receive-image", {
+        sender,
+        receiver,
+        chatId,              
+        mediaUrl: media.url,
+        mediaType: media.mediaType,
+        time: msg.time
+      });
     });
 
-    socket.emit("image-sent", { msg, media });
 
-  } catch (error) {
-    console.log("SOCKET IMAGE ERROR:", error);
-    socket.emit("image-error", { error: "Failed to send image" });
-  }
-});
+  socket.emit("image-sent", {
+    msg,
+    mediaUrl: media.url,
+  });
+
+    } catch (error) {
+      console.log("SOCKET IMAGE ERROR:", error);
+      socket.emit("image-error", { error: "Failed to send image" });
+    }
+  });
+
 
   socket.on("disconnect", () => {
-    console.log(`User ${socket.userId || socket.id} disconnected`);
+      console.log(`User ${socket.userId || socket.id} disconnected`);
+    });
   });
-});
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {

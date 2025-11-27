@@ -169,21 +169,19 @@ export const getUserMessages = async (req, res) => {
     .populate({
       path: "messages.mediaId",
       model: "ChatMedia",
-      select: "url mediaType mimeType size"
+      select: "url mediaType"
     });
 
-    if (!chat) {
-      return res.json([]);
-    }
+    if (!chat) return res.json([]);
 
     const formatted = chat.messages.map(m => ({
       _id: m._id,
       sender: m.sender,
       receiver: m.receiver,
       text: m.text || "",
-      mediaUrl: m.mediaId ? m.mediaId.url : null,
+      mediaUrl: m.mediaId ? m.mediaId.url : null,      
       mediaType: m.mediaId ? m.mediaId.mediaType : null,
-      timestamp: m.timestamp || m.time,
+      timestamp: m.time,                               
       read: m.read,
       status: m.status
     }));
@@ -198,6 +196,7 @@ export const getUserMessages = async (req, res) => {
     });
   }
 };
+
 
 // Controller function to mark messages as read
 export const markMessagesAsRead = async (req, res) => {
@@ -378,21 +377,19 @@ export const sendImageMessage = async (req, res) => {
   try {
     const { userId, otherUserId, chatId } = req.body;
 
-    // Validate
     if (!req.file) {
       return res.status(400).json({ message: "No image provided" });
     }
 
-    // Validate sender
-    const sender = await User.findById(userId);
-    if (!sender) {
-      return res.status(404).json({ message: "Sender not found" });
+    const sender = await User.findById(userId).select("name avatar");
+    const receiver = await User.findById(otherUserId).select("name avatar");
+
+    if (!sender || !receiver) {
+      return res.status(404).json({ message: "Invalid sender or receiver" });
     }
 
-    // Cloudinary upload
     const uploaded = await uploadToCloudinary(req.file.buffer);
 
-    // Find or create chat
     let chat = await Chat.findOne({
       participants: { $all: [userId, otherUserId] },
     });
@@ -400,54 +397,92 @@ export const sendImageMessage = async (req, res) => {
     if (!chat) {
       chat = await Chat.create({
         participants: [userId, otherUserId],
-        messages: [],
+        messages: []
       });
     }
 
-    // Create media record
     const media = await ChatMedia.create({
       chatId: chat._id,
       sender: userId,
       receiver: otherUserId,
       mediaType: "image",
       url: uploaded.secure_url,
-      public_id: uploaded.public_id,
-      size: uploaded.bytes,
-      mimeType: uploaded.format,
-      originalName: req.file.originalname,
-      extension: req.file.originalname.split(".").pop(),
+      originalName: req.file.originalname
     });
 
-    // Create message
     const msg = {
       sender: userId,
       receiver: otherUserId,
       text: "",
       time: new Date(),
-      status: "sent",
       read: false,
+      status: "sent",
       mediaId: media._id,
     };
 
     chat.messages.push(msg);
     await chat.save();
 
-    // Push message to both users
     await User.findByIdAndUpdate(userId, {
-      $push: { messages: msg },
-      $addToSet: { chats: chat._id },
+      $push: { messages: { ...msg, chatId: chat._id } },
+      $addToSet: { chats: chat._id }
     });
 
     await User.findByIdAndUpdate(otherUserId, {
-      $push: { messages: msg },
-      $addToSet: { chats: chat._id },
+      $push: { messages: { ...msg, chatId: chat._id } },
+      $addToSet: { chats: chat._id }
     });
+
+    const lastMsgObj = {
+      text: "(Image)",
+      timestamp: msg.time,
+      read: false,
+    };
+
+    await User.findOneAndUpdate(
+      { _id: userId, "chatWith.userId": otherUserId },
+      { $set: { "chatWith.$.lastMessage": lastMsgObj } }
+    );
+
+    await User.findOneAndUpdate(
+      { _id: userId, "chatWith.userId": { $ne: otherUserId } },
+      {
+        $push: {
+          chatWith: {
+            userId: otherUserId,
+            name: receiver.name,
+            avatar: receiver.avatar,
+            lastMessage: lastMsgObj
+          }
+        }
+      }
+    );
+
+    await User.findOneAndUpdate(
+      { _id: otherUserId, "chatWith.userId": userId },
+      { $set: { "chatWith.$.lastMessage": lastMsgObj } }
+    );
+
+    await User.findOneAndUpdate(
+      { _id: otherUserId, "chatWith.userId": { $ne: userId } },
+      {
+        $push: {
+          chatWith: {
+            userId: userId,
+            name: sender.name,
+            avatar: sender.avatar,
+            lastMessage: lastMsgObj
+          }
+        }
+      }
+    );
 
     return res.status(200).json({
       success: true,
-      chatId: chat._id,
       message: msg,
-      media,
+      mediaId: media._id,
+      chatId: chat._id,
+      mediaUrl: media.url,
     });
 
   } catch (error) {
@@ -459,5 +494,8 @@ export const sendImageMessage = async (req, res) => {
     });
   }
 };
+
+
+
 
 
