@@ -12,25 +12,25 @@ const UserSchema = new mongoose.Schema({
   },
   password: { 
     type: String, 
-    required: true 
+    default: null 
   },
   phoneNumber: {
     type: String,
-    required: true
+    default: null
   },
   discoverySource: {
     type: String,
-    required: true,
+    default: null,
     enum: ['Google Search', 'Friend Referral', 'Social Media', 'Advertisement', 'Other']
   },
   avatar: {
     public_id: { 
       type: String, 
-      required: true 
+      default: null 
     },
     url: { 
       type: String, 
-      required: true 
+      default: "" 
     },
   },
   token: { 

@@ -19,6 +19,7 @@
     "dotenv": "^16.6.1",
     "express": "^4.19.2",
     "fs": "^0.0.1-security",
+    "google-auth-library": "^10.5.0",
     "http": "^0.0.1-security",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.2.2",

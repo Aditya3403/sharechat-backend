@@ -2,6 +2,8 @@ import express from 'express';
 import { 
   signup,
   login,
+  googleLogin,
+  googleSignup,
   getProfile,
   getAllUsers,
   getCurrentUser,
@@ -19,6 +21,8 @@ const upload = multer({ storage });
 
 router.post('/signup', upload.single('image'), signup);
 router.post('/login', login);
+router.post('/google-login', googleLogin);
+router.post('/google-signup', googleSignup);
 
 router.post('/send-otp', sendOTP);
 router.post('/verify-otp', verifyOTP);

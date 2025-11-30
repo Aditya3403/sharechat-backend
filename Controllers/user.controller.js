@@ -2,6 +2,9 @@ import User from '../Models/Users.js';
 import jwt from 'jsonwebtoken';
 import cloudinary from 'cloudinary';
 import { Readable } from 'stream';
+import { OAuth2Client } from "google-auth-library";
+
+const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 // Configure Cloudinary
 cloudinary.config({
@@ -198,6 +201,99 @@ export const login = async (req, res) => {
     });
   }
 };
+
+// Google Login
+export const googleLogin = async (req, res) => {
+  try {
+    const { credential } = req.body;
+
+    const ticket = await client.verifyIdToken({
+      idToken: credential,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+
+    const payload = ticket.getPayload();
+
+    const email = payload.email;
+    const name = payload.name;
+    const picture = payload.picture;
+
+    let user = await User.findOne({ email });
+
+    // If new Google user → create record
+    if (!user) {
+      user = await User.create({
+        email,
+        name,
+        avatar: {
+          url: payload.picture,
+          public_id: null
+        },
+        phoneNumber: null,
+        discoverySource: null,
+        password: null,
+        authProvider: "google",
+        isVerified: true,
+        profileCompleted: false,
+      });
+    }
+
+
+    const token = jwt.sign(
+      { id: user._id },
+      process.env.JWT_SECRET,
+      { expiresIn: "30d" }
+    );
+
+    res.json({ token, user });
+  } catch (error) {
+    console.error(error);
+    res.status(400).json({ message: "Google login failed" });
+  }
+};
+
+// Google Signup
+export const googleSignup = async (req, res) => {
+  try {
+    const { credential } = req.body;
+
+    const ticket = await client.verifyIdToken({
+      idToken: credential,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+
+    const payload = ticket.getPayload();
+    const { email, name, picture } = payload;
+
+    // if user exists, force login path instead
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        message: "User already exists. Please log in.",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      onboarding: true,
+      data: {
+        email,
+        name,
+        avatar: picture,
+      }
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      message: "Google Sign-up verification failed",
+      error: error.message
+    });
+  }
+};
+
+
 
 // Get User Profile
 export const getProfile = async (req, res) => {
